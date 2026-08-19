@@ -5,6 +5,7 @@ import uuid
 import asyncpg
 import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
+from engine.invariants import INVARIANTS
 
 KAFKA_SERVER = "localhost:9092"
 TOPIC = "game-events"
@@ -30,8 +31,7 @@ async def rule_duplicate_transaction(event: dict) -> dict | None:
     return None
 
 
-RULES = [rule_duplicate_transaction]
-
+RULES = [rule_duplicate_transaction] + INVARIANTS
 
 async def save_incident(finding: dict, event: dict) -> str:
     code = f"INC-{uuid.uuid4().hex[:8].upper()}"
