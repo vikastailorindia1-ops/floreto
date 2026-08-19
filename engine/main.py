@@ -1,14 +1,18 @@
 import asyncio
 import json
+import uuid
 
+import asyncpg
 import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
 
 KAFKA_SERVER = "localhost:9092"
 TOPIC = "game-events"
 GROUP = "security-engine"
+PG_DSN = "postgresql://floreto:floreto_dev_pass@localhost:5432/security"
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
+pg: asyncpg.Pool | None = None
 
 
 async def rule_duplicate_transaction(event: dict) -> dict | None:
@@ -29,14 +33,27 @@ async def rule_duplicate_transaction(event: dict) -> dict | None:
 RULES = [rule_duplicate_transaction]
 
 
+async def save_incident(finding: dict, event: dict) -> str:
+    code = f"INC-{uuid.uuid4().hex[:8].upper()}"
+    await pg.execute(
+        "INSERT INTO incidents (incident_code, rule, severity, message, event) VALUES ($1,$2,$3,$4,$5)",
+        code, finding["rule"], finding["severity"], finding["message"], json.dumps(event),
+    )
+    return code
+
+
 async def process_event(event: dict):
     for rule in RULES:
         finding = await rule(event)
         if finding:
-            print(f"🚨 INCIDENT [{finding['severity']}] {finding['rule']}: {finding['message']}")
+            code = await save_incident(finding, event)
+            print(f"🚨 {code} [{finding['severity']}] {finding['rule']}: {finding['message']}")
 
 
 async def main():
+    global pg
+    pg = await asyncpg.create_pool(PG_DSN, min_size=1, max_size=5)
+    print("📔 PostgreSQL diary connected")
     consumer = AIOKafkaConsumer(
         TOPIC,
         bootstrap_servers=KAFKA_SERVER,
@@ -51,6 +68,7 @@ async def main():
             await process_event(msg.value)
     finally:
         await consumer.stop()
+        await pg.close()
 
 
 if __name__ == "__main__":
