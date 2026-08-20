@@ -1,5 +1,10 @@
 # engine/invariants.py — AAPKE khud ke niyam
-# Har invariant: event leta hai, finding (dict) ya None lautata hai
+from pymongo import AsyncMongoClient
+
+# Game ke MongoDB se READ-ONLY connection (Security Data Access Layer)
+mongo = AsyncMongoClient("mongodb://localhost:27017")
+wallets = mongo.game.wallets
+ledger = mongo.game.ledger
 
 FINANCIAL_EVENTS = {"DEPOSIT", "WITHDRAWAL", "REWARD", "SETTLEMENT"}
 
@@ -27,4 +32,48 @@ async def invariant_amount_positive(event: dict) -> dict | None:
     return None
 
 
-INVARIANTS = [invariant_financial_needs_amount, invariant_amount_positive]
+async def invariant_balance_not_negative(event: dict) -> dict | None:
+    """Event ke waqt user ka ASLI wallet padho — negative = impossible state."""
+    if event.get("event_type") not in FINANCIAL_EVENTS:
+        return None
+    w = await wallets.find_one({"user_id": event.get("user_id")})
+    if w and w.get("balance", 0) < 0:
+        return {
+            "rule": "INVARIANT_NEGATIVE_BALANCE",
+            "severity": "CRITICAL",
+            "message": f"user={event.get('user_id')} ka wallet balance {w['balance']}?! Impossible state. txn={event.get('transaction_id')}",
+        }
+    return None
+
+
+async def invariant_ledger_matches_wallet(event: dict) -> dict | None:
+    """Ledger ki saari entries ka jod == wallet balance. Mismatch = bhoot paisa."""
+    if event.get("event_type") not in FINANCIAL_EVENTS:
+        return None
+    uid = event.get("user_id")
+    w = await wallets.find_one({"user_id": uid})
+    if not w:
+        return None
+    cursor = await ledger.aggregate([
+        {"$match": {"user_id": uid}},
+        {"$group": {"_id": None, "total": {"$sum": "$amount"}}},
+    ])
+    rows = await cursor.to_list(length=1)
+    ledger_total = rows[0]["total"] if rows else 0
+    balance = w.get("balance", 0)
+    if ledger_total != balance:
+        diff = balance - ledger_total
+        return {
+            "rule": "INVARIANT_LEDGER_WALLET_MISMATCH",
+            "severity": "CRITICAL",
+            "message": f"user={uid}: wallet={balance} lekin ledger total={ledger_total} — ₹{diff} ka koi hisaab nahi! txn={event.get('transaction_id')}",
+        }
+    return None
+
+
+INVARIANTS = [
+    invariant_financial_needs_amount,
+    invariant_amount_positive,
+    invariant_balance_not_negative,
+    invariant_ledger_matches_wallet,
+]

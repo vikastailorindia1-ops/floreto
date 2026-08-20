@@ -3,35 +3,19 @@ import json
 import uuid
 
 import asyncpg
-import redis.asyncio as redis
 from aiokafka import AIOKafkaConsumer
-from engine.invariants import INVARIANTS
+
+from engine.real_rules import REAL_RULES
 
 KAFKA_SERVER = "localhost:9092"
 TOPIC = "game-events"
 GROUP = "security-engine"
 PG_DSN = "postgresql://floreto:floreto_dev_pass@localhost:5432/security"
 
-r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 pg: asyncpg.Pool | None = None
 
+RULES = REAL_RULES   # ← sipahiyon ki list ab real_rules.py se aati hai
 
-async def rule_duplicate_transaction(event: dict) -> dict | None:
-    txn = event.get("transaction_id")
-    if not txn:
-        return None
-    # NX = sirf tab set karo agar key pehle se nahi hai (atomic, race-proof)
-    first_time = await r.set(f"txn:{txn}", event["event_id"], nx=True, ex=86400)
-    if not first_time:
-        return {
-            "rule": "DUPLICATE_TRANSACTION",
-            "severity": "HIGH",
-            "message": f"txn {txn} DOBARA aaya! user={event.get('user_id')} amount={event.get('amount')}",
-        }
-    return None
-
-
-RULES = [rule_duplicate_transaction] + INVARIANTS
 
 async def save_incident(finding: dict, event: dict) -> str:
     code = f"INC-{uuid.uuid4().hex[:8].upper()}"
@@ -62,7 +46,7 @@ async def main():
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
     )
     await consumer.start()
-    print("💂 Security Engine on duty...")
+    print("💂 Security Engine on duty (REAL rules)...")
     try:
         async for msg in consumer:
             await process_event(msg.value)

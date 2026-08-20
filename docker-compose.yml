@@ -1,6 +1,7 @@
 services:
   mongodb:
     image: mongo:8
+    command: ["mongod", "--replSet", "rs0"]
     container_name: floreto-mongo
     restart: unless-stopped
     ports:
