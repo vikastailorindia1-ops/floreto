@@ -5,6 +5,7 @@ import uuid
 import asyncpg
 from aiokafka import AIOKafkaConsumer
 
+from engine.alerts import send_alert
 from engine.real_rules import REAL_RULES
 
 KAFKA_SERVER = "localhost:9092"
@@ -14,7 +15,7 @@ PG_DSN = "postgresql://floreto:floreto_dev_pass@localhost:5432/security"
 
 pg: asyncpg.Pool | None = None
 
-RULES = REAL_RULES   # ← sipahiyon ki list ab real_rules.py se aati hai
+RULES = REAL_RULES   # ← sipahiyon ki list real_rules.py se
 
 
 async def save_incident(finding: dict, event: dict) -> str:
@@ -32,6 +33,7 @@ async def process_event(event: dict):
         if finding:
             code = await save_incident(finding, event)
             print(f"🚨 {code} [{finding['severity']}] {finding['rule']}: {finding['message']}")
+            await send_alert(code, finding)
 
 
 async def main():
