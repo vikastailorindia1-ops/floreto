@@ -7,6 +7,7 @@ from aiokafka import AIOKafkaConsumer
 
 from engine.telegram_alerts import send_alert
 from engine.dw_rules import REAL_RULES
+from ai.investigator import investigate, send_telegram
 
 KAFKA_SERVER = "localhost:9092"
 TOPIC = "game-events"
@@ -15,7 +16,7 @@ PG_DSN = "postgresql://floreto:floreto_dev_pass@localhost:5432/security"
 
 pg: asyncpg.Pool | None = None
 
-RULES = REAL_RULES   # ← sipahiyon ki list real_rules.py se
+RULES = REAL_RULES   # ← sipahiyon ki list dw_rules.py se
 
 
 async def save_incident(finding: dict, event: dict) -> str:
@@ -27,14 +28,28 @@ async def save_incident(finding: dict, event: dict) -> str:
     return code
 
 
+async def auto_investigate(code: str):
+    try:
+        print(f"🕵️ auto-jaanch shuru: {code} (background)")
+        report = await investigate(code)
+        await send_telegram(report)      # sirf YE ek message — poori report ke saath
+        print(f"🕵️ report bheji: {code}")
+    except Exception as e:
+        print(f"⚠️ jaanch fail ({code}): {e}")
+
+
 async def process_event(event: dict):
     for rule in RULES:
         finding = await rule(event)
         if finding:
             code = await save_incident(finding, event)
             print(f"🚨 {code} [{finding['severity']}] {finding['rule']}: {finding['message']}")
-            await send_alert(code, finding)
-
+            if finding["severity"] == "CRITICAL":
+                # CRITICAL: turant alarm NAHI — seedha jaanch, phir EK poori report
+                asyncio.create_task(auto_investigate(code))
+            else:
+                # HIGH/MEDIUM: turant alarm (in par auto-jaanch nahi)
+                await send_alert(code, finding)
 
 async def main():
     global pg
