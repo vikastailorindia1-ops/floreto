@@ -2,7 +2,7 @@
 import re
 
 import redis.asyncio as redis
-from engine.db_rules import DB_RULES
+from engine.db_verify_rules import DB_RULES
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 

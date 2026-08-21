@@ -5,8 +5,8 @@ import uuid
 import asyncpg
 from aiokafka import AIOKafkaConsumer
 
-from engine.alerts import send_alert
-from engine.real_rules import REAL_RULES
+from engine.telegram_alerts import send_alert
+from engine.dw_rules import REAL_RULES
 
 KAFKA_SERVER = "localhost:9092"
 TOPIC = "game-events"
