@@ -76,25 +76,6 @@ async def rule_db_closing_matches(event: dict) -> dict | None:
         print(f"⚠️ db rule skip: {e}")
         return None
 
-async def rule_db_txn_already_processed(event: dict) -> dict | None:
-    """Same txn DB me pehle se approved? Redis nahi — DB ka sach."""
-    if db is None or event.get("event_type") not in MONEY_EVENTS:
-        return None
-    try:
-        txn = event.get("transaction_id")
-        if not txn:
-            return None
-        coll = db.depositsuccesses if event["event_type"] == "DEPOSIT_APPROVED" else db.withdrawalsuccesses
-        existing = await coll.find_one({"txnId": txn}, {"_id": 1, "clientname": 1, "amount": 1})
-        if existing:
-            return {"rule": "TXN_ALREADY_IN_DB", "severity": "CRITICAL",
-                    "message": f"{event['event_type']} txn={txn} DB me PEHLE SE approved hai! (client '{existing.get('clientname')}', ₹{existing.get('amount')}) — dobara process ho raha hai, double-credit!"}
-        return None
-    except Exception as e:
-        print(f"⚠️ db rule skip: {e}")
-        return None
-
-
 async def rule_db_duplicate_utr(event: dict) -> dict | None:
     """Same UTR do baar? Ek bank-payment do baar bhunaya ja raha — fraud."""
     if db is None or event.get("event_type") != "DEPOSIT_APPROVED":
@@ -139,5 +120,33 @@ async def rule_db_utr_belongs_elsewhere(event: dict) -> dict | None:
         return None
 
 
+async def rule_db_utr_reused_at_request(event: dict) -> dict | None:
+    """DEPOSIT_REQUESTED: is UTR se pehle bhi koi request/success to nahi? Request time pe hi pakdo."""
+    if db is None or event.get("event_type") != "DEPOSIT_REQUESTED":
+        return None
+    try:
+        meta = event.get("metadata") or {}
+        utr = meta.get("utr")
+        if not utr:
+            return None
+        utr_norm = str(utr).strip().upper().replace(" ", "")
+        # DB me pehle se koi approved deposit is UTR se?
+        in_success = await db.depositsuccesses.count_documents({"utrNumber": utr_norm})
+        # ya koi aur pending/approved request (khud ke alawa)?
+        this_txn = event.get("transaction_id")
+        in_requests = await db.depositrequests.count_documents({
+            "utrNumber": utr_norm,
+            "txnId": {"$ne": this_txn},
+            "status": {"$in": ["pending", "approved"]},
+        })
+        if in_success > 0 or in_requests > 0:
+            return {"rule": "UTR_REUSED_AT_REQUEST", "severity": "CRITICAL",
+                    "message": f"DEPOSIT_REQUESTED txn={this_txn}: UTR '{utr_norm}' pehle se use ho chuka hai (approved: {in_success}, pending/other-req: {in_requests})! Game ka UTR-guard bypass hua — duplicate deposit request bani. user={event.get('user_id')}"}
+        return None
+    except Exception as e:
+        print(f"⚠️ db rule skip: {e}")
+        return None
+
+
 DB_RULES = [rule_db_user_real, rule_db_closing_matches,
-            rule_db_txn_already_processed, rule_db_duplicate_utr, rule_db_utr_belongs_elsewhere]
+            rule_db_duplicate_utr, rule_db_utr_belongs_elsewhere ,rule_db_utr_reused_at_request]

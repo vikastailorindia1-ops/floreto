@@ -59,7 +59,7 @@ async def main():
         TOPIC,
         bootstrap_servers=KAFKA_SERVER,
         group_id=GROUP,
-        auto_offset_reset="earliest",
+        auto_offset_reset="latest",
         value_deserializer=lambda v: json.loads(v.decode("utf-8")),
     )
     await consumer.start()
