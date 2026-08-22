@@ -76,5 +76,68 @@ async def rule_db_closing_matches(event: dict) -> dict | None:
         print(f"⚠️ db rule skip: {e}")
         return None
 
+async def rule_db_txn_already_processed(event: dict) -> dict | None:
+    """Same txn DB me pehle se approved? Redis nahi — DB ka sach."""
+    if db is None or event.get("event_type") not in MONEY_EVENTS:
+        return None
+    try:
+        txn = event.get("transaction_id")
+        if not txn:
+            return None
+        coll = db.depositsuccesses if event["event_type"] == "DEPOSIT_APPROVED" else db.withdrawalsuccesses
+        existing = await coll.find_one({"txnId": txn}, {"_id": 1, "clientname": 1, "amount": 1})
+        if existing:
+            return {"rule": "TXN_ALREADY_IN_DB", "severity": "CRITICAL",
+                    "message": f"{event['event_type']} txn={txn} DB me PEHLE SE approved hai! (client '{existing.get('clientname')}', ₹{existing.get('amount')}) — dobara process ho raha hai, double-credit!"}
+        return None
+    except Exception as e:
+        print(f"⚠️ db rule skip: {e}")
+        return None
 
-DB_RULES = [rule_db_user_real, rule_db_closing_matches]
+
+async def rule_db_duplicate_utr(event: dict) -> dict | None:
+    """Same UTR do baar? Ek bank-payment do baar bhunaya ja raha — fraud."""
+    if db is None or event.get("event_type") != "DEPOSIT_APPROVED":
+        return None
+    try:
+        meta = event.get("metadata") or {}
+        utr = meta.get("utr") or meta.get("utrNumber")
+        if not utr:
+            return None
+        # normalize wahi jaise backend karta hai
+        utr_norm = str(utr).strip().upper().replace(" ", "")
+        matches = await db.depositsuccesses.count_documents({"utrNumber": utr_norm})
+        if matches > 1:  # 1 = ye khud; 2+ = duplicate
+            return {"rule": "DUPLICATE_UTR", "severity": "CRITICAL",
+                    "message": f"UTR '{utr_norm}' DB me {matches} baar hai! Ek bank-payment ko multiple deposits me bhuna raha — txn={event.get('transaction_id')} user={event.get('user_id')}"}
+        return None
+    except Exception as e:
+        print(f"⚠️ db rule skip: {e}")
+        return None
+
+
+async def rule_db_utr_belongs_elsewhere(event: dict) -> dict | None:
+    """Ye UTR kisi DOOSRE user ke deposit me to nahi? Stolen UTR."""
+    if db is None or event.get("event_type") != "DEPOSIT_APPROVED":
+        return None
+    try:
+        meta = event.get("metadata") or {}
+        utr = meta.get("utr") or meta.get("utrNumber")
+        uid = _oid(event.get("user_id"))
+        if not utr or uid is None:
+            return None
+        utr_norm = str(utr).strip().upper().replace(" ", "")
+        other = await db.depositsuccesses.find_one(
+            {"utrNumber": utr_norm, "userId": {"$ne": uid}},
+            {"clientname": 1})
+        if other:
+            return {"rule": "UTR_STOLEN", "severity": "CRITICAL",
+                    "message": f"UTR '{utr_norm}' pehle se kisi AUR user ('{other.get('clientname')}') ke deposit me use hui — chori/reuse! txn={event.get('transaction_id')}"}
+        return None
+    except Exception as e:
+        print(f"⚠️ db rule skip: {e}")
+        return None
+
+
+DB_RULES = [rule_db_user_real, rule_db_closing_matches,
+            rule_db_txn_already_processed, rule_db_duplicate_utr, rule_db_utr_belongs_elsewhere]
