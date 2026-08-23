@@ -13,6 +13,10 @@ FLOWS = {
                   "STATEMENTS_WRITTEN", "SUCCESS_RECORDED"],
         "final": "DEPOSIT_APPROVED",
     },
+      "DEPOSIT_REQUEST": {
+        "steps": ["GUARDS_PASSED", "REQUEST_CREATED"],
+        "final": "DEPOSIT_REQUESTED",
+    },
 }
 FINAL_TO_FLOW = {v["final"]: k for k, v in FLOWS.items()}
 

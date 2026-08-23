@@ -10,7 +10,41 @@ GAME_URI = os.getenv("GAME_MONGO_URI", "")
 GAME_DB = os.getenv("GAME_MONGO_DB", "")
 
 _client = AsyncMongoClient(GAME_URI, serverSelectionTimeoutMS=5000) if GAME_URI else None
-db = _client[GAME_DB] if (_client is not None and GAME_DB) else None
+_raw_db = _client[GAME_DB] if (_client is not None and GAME_DB) else None
+
+
+_ALLOWED_READS = {
+    "find", "find_one", "count_documents", "estimated_document_count",
+    "distinct", "aggregate", "watch",
+}
+
+
+class _SafeCollection:
+    def __init__(self, coll, name):
+        self._coll = coll
+        self._name = name
+
+    def __getattr__(self, method):
+        if method in _ALLOWED_READS:
+            return getattr(self._coll, method)
+        def _blocked(*args, **kwargs):
+            raise PermissionError(
+                f"SAFETY GATE: '{method}' BLOCK - security engine sirf READ kar sakta hai "
+                f"(collection: {self._name}).")
+        return _blocked
+
+
+class _SafeDB:
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, coll_name):
+        return _SafeCollection(getattr(self._db, coll_name), coll_name)
+
+
+db = _SafeDB(_raw_db) if _raw_db is not None else None
+
+
 
 MONEY_EVENTS = {"DEPOSIT_APPROVED", "WITHDRAWAL_PAID"}
 ALL_FLOW = MONEY_EVENTS | {"DEPOSIT_REQUESTED", "WITHDRAW_REQUESTED"}
