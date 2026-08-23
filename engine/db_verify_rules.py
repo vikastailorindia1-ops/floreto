@@ -45,7 +45,6 @@ class _SafeDB:
 db = _SafeDB(_raw_db) if _raw_db is not None else None
 
 
-
 MONEY_EVENTS = {"DEPOSIT_APPROVED", "WITHDRAWAL_PAID"}
 ALL_FLOW = MONEY_EVENTS | {"DEPOSIT_REQUESTED", "WITHDRAW_REQUESTED"}
 EPS = 0.01
