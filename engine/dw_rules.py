@@ -3,6 +3,7 @@ import re
 
 import redis.asyncio as redis
 from engine.db_verify_rules import DB_RULES
+from engine.flow_rules import FLOW_RULES
 
 r = redis.Redis(host="localhost", port=6379, decode_responses=True)
 
@@ -23,6 +24,9 @@ TXN_FMT = {
 async def rule_flow_whitelist(event: dict) -> dict | None:
     """DEFAULT-DENY: jo aapke flow jaisa nahi — type/format/shape — wo alarm."""
     et = event.get("event_type")
+    # TXN_STEP alag event hai — use flow_rules dekhta hai, whitelist nahi
+    if event.get("event_type") == "TXN_STEP":
+        return None
     if et not in TXN_FMT:
         return {"rule": "UNKNOWN_EVENT_TYPE", "severity": "HIGH",
                 "message": f"'{et}' — aapke flow me aisa event hai hi NAHI. user={event.get('user_id')}"}
@@ -164,5 +168,5 @@ async def rule_bonus_policy(event: dict) -> dict | None:
 
 REAL_RULES = [rule_flow_whitelist, rule_track_requests, rule_double_approval,
               rule_amount_sane, rule_closing_not_negative,
-              rule_ghost_or_tampered_approval, rule_balance_chain, rule_bonus_policy] + DB_RULES
+              rule_ghost_or_tampered_approval, rule_bonus_policy] + DB_RULES + FLOW_RULES
 

@@ -29,7 +29,7 @@ app = FastAPI(title="Event Collector", lifespan=lifespan)
 class GameEvent(BaseModel):
     event_id: str
     event_type: str          # DEPOSIT, WITHDRAWAL, LOGIN, REWARD...
-    user_id: str
+    user_id: str | None = None
     transaction_id: str | None = None
     amount: float | None = None
     service: str = "game"
@@ -47,7 +47,7 @@ async def collect_event(event: GameEvent):
     try:
         data = event.model_dump_json().encode("utf-8")
         # key=user_id => same user ke events same partition => order guaranteed
-        await producer.send_and_wait(TOPIC, value=data, key=event.user_id.encode("utf-8"))
+        await producer.send_and_wait(TOPIC, value=data, key=(event.user_id or event.transaction_id or event.event_id).encode("utf-8"))
         return {"accepted": True, "event_id": event.event_id}
     except Exception as e:
         raise HTTPException(status_code=503, detail=f"Kafka error: {e}")
