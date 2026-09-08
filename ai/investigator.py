@@ -22,15 +22,31 @@ game = AsyncMongoClient(GAME_URI)[GAME_DB] if GAME_URI and GAME_DB else None
 BOT = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 
-SYSTEM = """Tum ek betting-platform ke senior fraud investigator ho.
-Tumhe ek security incident + uska evidence milega. Sirf diye gaye FACTS use karo — kuch bhi assume/invent mat karo.
-Report EXACTLY is format me, Hinglish me, chhoti aur seedhi:
-KYA HUA: <1-2 line>
-ROOT CAUSE (shak): <sabse likely wajah; agar evidence kam hai to saaf likho 'evidence adhoora'>
-FINANCIAL IMPACT: <₹ amount ya 'zero/unknown'>
-EVIDENCE: <2-3 bullet, sirf diye gaye data se>
-CONFIDENCE: <0-100%>
-RECOMMENDED ACTION: <1 line — monitor / txn freeze / manual review>"""
+SYSTEM = """Tum ek security guard ho jo game-admin ko SAADI bhasha me poori kahani batata hai.
+Sirf diye gaye FACTS use karo — kuch invent mat karo.
+
+Tumhe milega: incident ka rule, event ka data, aur SAME TXN ke doosre incidents (jo poori kahani banate hain).
+DOOSRE INCIDENTS ko zaroor padho — usse pata chalta hai user ne kya-kya kiya step by step.
+
+Report EXACTLY is format me, Hinglish me:
+
+🔴 Kya hua: <1-2 line simple bhasha me — kya galat hua>
+
+⚠️ User ne kya kiya: <2-3 line — user ne EXACTLY kya kiya, step by step.
+   Jaise: "user2 ne pehle ek UTR se ₹500 ka deposit karvaya (approve ho gaya).
+   Phir USI UTR se dobara ₹500 ki nayi request bheji — jo nahi honi chahiye thi.">
+
+🐛 Bug/gadbad kaise hui: <2-3 line — technical wajah SIMPLE bhasha me.
+   Jaise: "Normal flow me UTR-check hota hai jo duplicate rokta hai. Par is baar
+   wo check chala hi nahi (bypass hua) — ya to code me bug hai ya kisi ne API se
+   seedha request bheji guard ko skip karke. Isliye duplicate request ban gayi.">
+
+👤 Kaun: <username>
+💰 Paisa: <₹ amount>
+🧾 Transaction: <txn id>
+✅ Karo: <1-2 line — admin kya kare + developer kaunsi cheez check kare>
+
+Simple bhasha, par POORI kahani. Developer ko samajh aaye ki kya, kaise, aur kahan dekhna hai."""
 
 
 async def gather_case(inc_code: str) -> dict | None:
@@ -86,7 +102,67 @@ async def investigate(inc_code: str) -> str:
                   + (f"Detective ki adhoori soch (aakhri hissa):\n...{thinking[-1200:]}" if thinking else "max_tokens aur badhao."))
     if resp.usage:
         print(f"   (tokens: prompt={resp.usage.prompt_tokens}, soch+jawab={resp.usage.completion_tokens})")
-    return f"🕵️ JAANCH REPORT — {inc_code} [{inc['severity']}] {inc['rule']}\n\n{report}"
+    # rule-name ki jagah aasaan heading (aam banda samjhe)
+    icon = {"CRITICAL": "🔴", "HIGH": "🟠", "MEDIUM": "🟡"}.get(inc["severity"], "⚪")
+
+    # 🔧 Developer footer — kaunsa flow/step/rule, taaki dev turant sahi jagah dekhe
+    ev = case["event"]
+    meta = ev.get("event_type", "?")
+    flow = (ev.get("metadata") or {}).get("flow", "")
+    # rule se batao kaunsi file/function dekhni hai
+    RULE_LOCATION = {
+        "STEPS_MISSING_AT_FINAL":   "flow_rules.py → rule_flow_steps (koi emitStep miss hua)",
+        "STEP_OUT_OF_ORDER":        "flow_rules.py → rule_flow_steps (step galat order)",
+        "STEP_REPEATED":            "flow_rules.py → rule_flow_steps (step 2 baar)",
+        "UTR_REUSED_AT_REQUEST":    "db_rules.py → rule_db_utr_reused_at_request (submitDepositRequest ka UTR guard)",
+        "DUPLICATE_UTR":            "db_rules.py → rule_db_duplicate_utr (depositsuccess ka UTR check)",
+        "UTR_STOLEN":               "db_rules.py → rule_db_utr_belongs_elsewhere",
+        "DOUBLE_APPROVAL":          "real_rules.py → rule_double_approval (depositsuccess/withdrawsuccess)",
+        "APPROVAL_WITHOUT_REQUEST": "real_rules.py → rule_ghost_or_tampered_approval",
+        "BONUS_ABOVE_HARD_CAP":     "real_rules.py → rule_bonus_policy (depositsuccess bonus)",
+        "USER_NOT_IN_DB":           "db_rules.py → rule_db_user_real (forged event)",
+        "AGENT_NOT_IN_DB":          "db_rules.py → rule_db_user_real",
+        "WRONG_AGENT_FOR_USER":     "db_rules.py → rule_db_user_real (hierarchy)",
+        "MALFORMED_TXN_ID":         "real_rules.py → rule_flow_whitelist (event shape)",
+        "MALFORMED_USER_ID":        "real_rules.py → rule_flow_whitelist",
+        "MALFORMED_AGENT_ID":       "real_rules.py → rule_flow_whitelist",
+        "NEGATIVE_CLOSING":         "real_rules.py → rule_closing_not_negative",
+        "BAD_AMOUNT":               "real_rules.py → rule_amount_sane",
+    }
+    where = RULE_LOCATION.get(inc["rule"], "engine rules — manual check")
+
+    # kaunsa game-function (event_type + flow se)
+    GAME_FN = {
+        "DEPOSIT_REQUESTED":  "submitDepositRequest (userDWCtrl.js)",
+        "DEPOSIT_APPROVED":   "depositsuccess (admin controller)",
+        "WITHDRAW_REQUESTED": "submitWithdrawRequest (userDWCtrl.js)",
+        "WITHDRAWAL_PAID":    "withdrawsuccess (admin controller)",
+        "TXN_STEP":           f"{flow} flow ka koi step" if flow else "step event",
+    }
+    game_fn = GAME_FN.get(meta, meta)
+
+    # incident ka time — IST me (kab bug aaya)
+    from datetime import timezone, timedelta
+    IST = timezone(timedelta(hours=5, minutes=30))
+    ts = inc.get("created_at")
+    if ts:
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        time_str = ts.astimezone(IST).strftime("%d-%b-%Y %I:%M:%S %p IST")
+    else:
+        time_str = "?"
+
+    dev_footer = (
+        f"\n\n━━━ 🔧 DEVELOPER INFO ━━━\n"
+        f"⏰ Kab hua: {time_str}\n"
+        f"Rule: {inc['rule']}\n"
+        f"Event: {meta}\n"
+        f"Game function: {game_fn}\n"
+        f"Engine location: {where}\n"
+        f"Full message: {inc['message']}"
+    )
+
+    return f"{icon} SECURITY ALERT\n(ref: {inc_code})\n\n{report}{dev_footer}"
 
 
 async def send_telegram(text: str):

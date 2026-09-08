@@ -168,5 +168,5 @@ async def rule_bonus_policy(event: dict) -> dict | None:
 
 REAL_RULES = [rule_flow_whitelist, rule_track_requests, rule_double_approval,
               rule_amount_sane, rule_closing_not_negative,
-              rule_ghost_or_tampered_approval, rule_balance_chain, rule_bonus_policy] + DB_RULES + FLOW_RULES
+              rule_ghost_or_tampered_approval, rule_bonus_policy] + DB_RULES + FLOW_RULES
 

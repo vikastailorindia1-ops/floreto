@@ -9,12 +9,14 @@ TTL = 7 * 86400
 # har flow ka POORA step-order + final event
 FLOWS = {
     "DEPOSIT_APPROVE": {
-        "steps": ["GUARDS_PASSED", "AGENT_DEBITED", "USER_CREDITED",
+        "steps": ["GUARDS_PASSED", "BONUS_CHECKED", "BALANCE_OK",
+                  "AGENT_DEBITED", "USER_CREDITED",
                   "STATEMENTS_WRITTEN", "SUCCESS_RECORDED"],
         "final": "DEPOSIT_APPROVED",
     },
-      "DEPOSIT_REQUEST": {
-        "steps": ["GUARDS_PASSED", "REQUEST_CREATED"],
+    "DEPOSIT_REQUEST": {
+        "steps": ["AUTH_PASSED", "UTR_CHECKED", "LIMITS_CHECKED",
+                  "BANK_VERIFIED", "REQUEST_CREATED"],
         "final": "DEPOSIT_REQUESTED",
     },
 }
@@ -42,7 +44,10 @@ async def rule_flow_steps(event: dict) -> dict | None:
         done.append(step)
         await r.set(key, json.dumps(done), ex=TTL)
         if missing:
-            return {"rule": "STEP_OUT_OF_ORDER", "severity": "CRITICAL",
+            # MEDIUM = sirf diary me (Telegram pe nahi). Final event pe
+            # STEPS_MISSING_AT_FINAL poori list ke saath CRITICAL alert dega —
+            # do jagah se alert na aaye isliye ye beech wala chup rakha.
+            return {"rule": "STEP_OUT_OF_ORDER", "severity": "MEDIUM",
                     "message": f"txn={txn} ({flow}): '{step}' aaya lekin {missing} abhi tak nahi — flow ke bahar/galat order!"}
         return None
 
@@ -60,7 +65,8 @@ async def rule_flow_steps(event: dict) -> dict | None:
         # self-deposit chhoot: agent==user pe AGENT_DEBITED nahi aata
         meta = event.get("metadata") or {}
         if flow == "DEPOSIT_APPROVE" and str(event.get("user_id")) == str(meta.get("agent_id")):
-            missing = [s for s in missing if s != "AGENT_DEBITED"]
+            # self-deposit: agent se katна nahi hota, to ye 2 steps skip (false alert na aaye)
+            missing = [s for s in missing if s not in ("AGENT_DEBITED", "BALANCE_OK")]
         if missing:
             return {"rule": "STEPS_MISSING_AT_FINAL", "severity": "CRITICAL",
                     "message": f"{et} txn={txn}: final aa gaya par ye steps kabhi nahi aaye {missing} — chhupa path/adhoora flow!"}

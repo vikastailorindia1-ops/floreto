@@ -41,6 +41,9 @@ class _SafeDB:
     def __getattr__(self, coll_name):
         return _SafeCollection(getattr(self._db, coll_name), coll_name)
 
+    def __getitem__(self, coll_name):
+        return _SafeCollection(self._db[coll_name], coll_name)
+
 
 db = _SafeDB(_raw_db) if _raw_db is not None else None
 
@@ -108,6 +111,7 @@ async def rule_db_closing_matches(event: dict) -> dict | None:
     except Exception as e:
         print(f"⚠️ db rule skip: {e}")
         return None
+
 
 async def rule_db_duplicate_utr(event: dict) -> dict | None:
     """Same UTR do baar? Ek bank-payment do baar bhunaya ja raha — fraud."""
@@ -181,5 +185,5 @@ async def rule_db_utr_reused_at_request(event: dict) -> dict | None:
         return None
 
 
-DB_RULES = [rule_db_user_real, rule_db_closing_matches,
-            rule_db_duplicate_utr, rule_db_utr_belongs_elsewhere ,rule_db_utr_reused_at_request]
+DB_RULES = [rule_db_user_real,
+            rule_db_duplicate_utr, rule_db_utr_belongs_elsewhere, rule_db_utr_reused_at_request]

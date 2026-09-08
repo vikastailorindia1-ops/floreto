@@ -44,12 +44,10 @@ async def process_event(event: dict):
         if finding:
             code = await save_incident(finding, event)
             print(f"🚨 {code} [{finding['severity']}] {finding['rule']}: {finding['message']}")
-            if finding["severity"] == "CRITICAL":
-                # CRITICAL: turant alarm NAHI — seedha jaanch, phir EK poori report
+            if finding["severity"] in ("CRITICAL", "HIGH"):
+                # CRITICAL + HIGH dono: detail wali jaanch-report (ek saaf message)
                 asyncio.create_task(auto_investigate(code))
-            else:
-                # HIGH/MEDIUM: turant alarm (in par auto-jaanch nahi)
-                await send_alert(code, finding)
+            # MEDIUM/LOW: sirf PostgreSQL diary me — Telegram pe NAHI
 
 async def main():
     global pg
